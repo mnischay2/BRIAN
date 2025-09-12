@@ -1,126 +1,138 @@
 import socket
-import torch
+import struct
 import numpy as np
-import soundfile as sf
-import io
+import whisper
+import torch
 import time
-import queue
-import threading
-from nemo.collections.asr.models import EncDecRNNTBPEModel
 
-# CONFIG
-DEVICE_B_IP = "localhost"  # Replace with Device B's IP
-PORT_MIC = 7001
-PORT_RESPONSE = 9000
+# --- Whisper Model Configuration ---
+# Automatically select GPU if available, otherwise fall back to CPU
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"[*] Using device: {DEVICE}")
+MODEL = whisper.load_model("large-v3", device=DEVICE)
+print("[+] Whisper model large-v3 loaded.")
 
-CHUNK_SIZE = 1024
-SAMPLE_RATE = 16000
-BUFFER_SECONDS = 3  # Buffer 3 seconds of audio
-BUFFER_SIZE = SAMPLE_RATE * 2 * BUFFER_SECONDS  # 2 bytes per sample
+# --- Network Configuration ---
+# Port to listen for mic client
+MIC_LISTENER_HOST = "0.0.0.0"
+MIC_LISTENER_PORT = 5001
 
-WAKE_WORDS = ["hi BRIAN", "hey BRIAN", "brian", "brain"]
+# Address for the forwarder service
+FORWARDER_HOST = "127.0.0.1"
+FORWARDER_PORT = 5002
 
-# Load NeMo ASR model
-print("⏳ Loading ASR model...")
-asr_model = EncDecRNNTBPEModel.from_pretrained(model_name="stt_en_fastconformer_transducer_large")
-print("✅ ASR model loaded!")
-
-audio_buffer = bytearray()
-data_queue = queue.Queue()
-
-# Receive audio MIC.PY
-def receive_audio_stream():
-    global audio_buffer
-
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind(("0.0.0.0", PORT_MIC))
-    server.listen(1)
-    print(f"🎧 Waiting for mic stream on port {PORT_MIC}...")
-    conn, addr = server.accept()
-    print(f"✅ Mic stream connected from {addr}")
-
+def connect_to_forwarder():
+    """
+    Attempts to connect to the forwarder service with retries.
+    """
     while True:
-        data = conn.recv(CHUNK_SIZE)
-        if not data:
-            break
-        audio_buffer.extend(data)
+        try:
+            print(f"[*] Attempting to connect to forwarder at {FORWARDER_HOST}:{FORWARDER_PORT}...")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((FORWARDER_HOST, FORWARDER_PORT))
+            print("[+] Connected to forwarder.")
+            return sock
+        except ConnectionRefusedError:
+            print("[!] Forwarder connection refused. Is it running? Retrying in 5s...")
+            time.sleep(5)
+        except Exception as e:
+            print(f"[!] Forwarder connection failed: {e}. Retrying in 5s...")
+            time.sleep(5)
 
-        if len(audio_buffer) >= BUFFER_SIZE:
-            chunk = bytes(audio_buffer[:BUFFER_SIZE])
-            del audio_buffer[:BUFFER_SIZE]
-            data_queue.put(chunk)
-
-# Transcribe audio chunk to text
-def transcribe(audio_bytes):
-    audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-    with torch.no_grad():
-        transcript = asr_model.transcribe([audio_np])[0]
-    return transcript.text.lower().strip()
-
-# Send response text to FORWARDER.PY
-def send_response(text):
+def send_to_forwarder(sock, text_data):
+    """
+    Sends transcribed text to the forwarder.
+    Returns the same socket on success, or a newly reconnected socket on failure.
+    """
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((DEVICE_B_IP, PORT_RESPONSE))
-        s.sendall(text.encode("utf-8"))
-        s.close()
-    except Exception as e:
-        print(f"❌ Could not send response to Device B: {e}")
+        encoded_data = text_data.encode('utf-8')
+        length = struct.pack('>I', len(encoded_data))
+        sock.sendall(length)
+        sock.sendall(encoded_data)
+        return sock
+    except (socket.error, BrokenPipeError, ConnectionResetError) as e:
+        print(f"[!] Forwarder disconnected: {e}. Reconnecting...")
+        sock.close()
+        return connect_to_forwarder()
 
-# Compute Root Mean Square (RMS) energy to detect silence
-def rms_energy(audio_bytes):
-    audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
-    return np.sqrt(np.mean(audio_np ** 2))
+def handle_mic_client(conn, addr, forwarder_sock):
+    """
+    Handles a single connection from a microphone client.
+    """
+    print(f"[+] Mic client connected from {addr}")
+    try:
+        while True:
+            # Receive the 4-byte length prefix
+            length_bytes = conn.recv(4)
+            if not length_bytes:
+                print(f"[-] Mic client {addr} disconnected (no length).")
+                break
+            
+            length = struct.unpack('>I', length_bytes)[0]
 
-# Main processing loop
-def process_audio():
-    listening = False
-    command_audio = bytearray()
-    silence_start = None
-    SILENCE_THRESHOLD = 500  # Tune this threshold as needed
-    SILENCE_DURATION = 3.0   # Stop listening after 3 seconds of silence
+            # Receive the audio data
+            data = b""
+            while len(data) < length:
+                packet = conn.recv(length - len(data))
+                if not packet:
+                    print(f"[-] Mic client {addr} disconnected (incomplete data).")
+                    return forwarder_sock # Return current forwarder socket
+                data += packet
 
-    while True:
-        if not data_queue.empty():
-            audio_chunk = data_queue.get()
+            print(f"[*] Received {len(data)} bytes of audio data.")
 
-            if not listening:
-                print("📝 Checking for wake word...")
-                transcript = transcribe(audio_chunk)
-                print(f"👂 Heard: {transcript}")
-                matched_wake_word = next((word for word in WAKE_WORDS if word in transcript), None)
+            # --- Amplitude check removed as it's handled by the client ---
+            
+            # Process and transcribe the audio
+            # Convert raw bytes to numpy array for transcription
+            audio_int16 = np.frombuffer(data, dtype=np.int16)
+            # Use fp16 for faster inference if on CUDA
+            audio_np = audio_int16.astype(np.float32) / 32768.0
+            result = MODEL.transcribe(audio_np, language="en", fp16=torch.cuda.is_available())
+            text = result['text'].strip()
 
-                if matched_wake_word:
-                    print(f"🟢 Wake word '{matched_wake_word}' detected! Listening for command...")
-                    listening = True
-                    command_audio = bytearray()
-                    silence_start = None
-                    send_response("Hi")
-                continue
-
-            # Accumulate command audio
-            command_audio.extend(audio_chunk)
-
-            # Check for silence
-            energy = rms_energy(audio_chunk)
-            print(f"🔊 Energy: {energy:.2f}")
-
-            if energy < SILENCE_THRESHOLD:
-                if silence_start is None:
-                    silence_start = time.time()
-                elif time.time() - silence_start >= SILENCE_DURATION:
-                    print("⏹️ Silence detected. Processing command...")
-                    command_text = transcribe(bytes(command_audio)).strip().lower()
-                    for word in WAKE_WORDS:
-                        command_text = command_text.replace(word, "")
-                    command_text = command_text.strip()
-                    print(f"🗣️ Command: {command_text}")
-                    send_response(command_text if command_text else "No command detected.")
-                    listening = False
+            if text:
+                print(f"📝 Transcription: {text}")
+                forwarder_sock = send_to_forwarder(forwarder_sock, text)
             else:
-                silence_start = None  # Reset timer if speech detected
+                print("[-] Received empty transcription.")
 
-# Start everything
+    except ConnectionResetError:
+        print(f"[-] Mic client {addr} disconnected forcefully.")
+    except Exception as e:
+        print(f"[!] Error handling client {addr}: {e}")
+    finally:
+        print(f"[*] Closing connection with {addr}.")
+        conn.close()
+    
+    return forwarder_sock
+
+def main():
+    """
+    Main server loop to listen for mic clients.
+    """
+    forwarder_sock = connect_to_forwarder()
+    
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((MIC_LISTENER_HOST, MIC_LISTENER_PORT))
+        s.listen(1)
+        print(f"[*] Transcription server listening on {MIC_LISTENER_HOST}:{MIC_LISTENER_PORT}")
+
+        while True:
+            try:
+                conn, addr = s.accept()
+                # Handle the client and update the forwarder socket in case it reconnected
+                forwarder_sock = handle_mic_client(conn, addr, forwarder_sock)
+            except KeyboardInterrupt:
+                print("\n[!] Server shutting down by user request.")
+                break
+            except Exception as e:
+                print(f"[!] An unexpected error occurred in the main loop: {e}")
+
+    forwarder_sock.close()
+
 if __name__ == "__main__":
-    threading.Thread(target=receive_audio_stream, daemon=True).start()
-    process_audio()
+    main()
+
+
