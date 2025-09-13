@@ -1,0 +1,81 @@
+# B.R.I.A.N. - Bio-Responsive Intelligent Assistant Network
+# Main Application Configuration File
+
+# --- Path Configuration ---
+paths:
+  # Absolute path to the Python executable in your virtual environment
+  python_executable: "/home/nischay/linenv311/bin/python"
+  # Absolute path to the root directory of your project
+  project_directory: "/home/nischay/home/github/BRIAN/"
+  # Directory to store session logs
+  session_log_directory: "sessions"
+
+# --- Model Configuration ---
+models:
+  # Whisper model size (e.g., tiny, base, small, medium, large-v3)
+  whisper: "large-v3"
+  # Ollama model to use for the LLM
+  ollama: "llama3"
+  # The endpoint for the local Ollama API server
+  ollama_endpoint: "http://localhost:11434/api/generate"
+
+# --- Wake Word Configuration ---
+wake_words:
+  # The assistant will only respond after hearing one of these words.
+  # Checking is case-sensitive.
+  - "Brian"
+  - "brian"
+
+# --- Text-to-Speech (TTS) Engine Configuration ---
+tts:
+  pyttsx3:
+    # Speaking rate (default is 200, lower is slower)
+    rate: 150
+    # The index of the voice to use. Find this with a helper script.
+    voice_index: 29
+
+# --- Session Management ---
+session:
+  # Session timeout in minutes. The session will be saved and closed
+  # after this many minutes of inactivity.
+  timeout_minutes: 20
+
+# --- Network Ports ---
+# Configuration for all internal microservices
+ports:
+  transcriber:
+    mic_host: "0.0.0.0"
+    mic_port: 2221
+    central_host: "127.0.0.1"
+    central_port: 2225 # Transcriber -> Central
+  
+  speaker:
+    text_host: "0.0.0.0" # Listens for text from Central
+    text_port: 2223
+    status_host: "0.0.0.0" # Reports status to Mic
+    status_port: 2224
+
+  mic:
+    transcriber_host: "127.0.0.1"
+    transcriber_port: 2221
+    speaker_status_host: "127.0.0.1"
+    speaker_status_port: 2224
+    
+  central:
+    transcriber_host: "0.0.0.0"
+    transcriber_port: 2225 # Central <- Transcriber
+    speaker_host: "127.0.0.1"
+    speaker_port: 2223
+    session_host: "127.0.0.1"
+    session_port: 2226
+    ui_host: "127.0.0.1"
+    ui_port: 2227
+
+  session_manager:
+    host: "0.0.0.0"
+    port: 2226
+    
+  ui:
+    host: "0.0.0.0"
+    port: 2227
+
