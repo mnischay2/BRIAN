@@ -3,14 +3,13 @@ wheel
 torch 
 torchvision 
 torchaudio
+pyaudio
 Cython
 numpy 
 soundfile 
 librosa
 pyttsx3
-
-then 
-$env:PYTHONUTF8=1
-pip install nemo_toolkit[asr]
-
-
+openai-whisper
+requests
+gtts
+TTS

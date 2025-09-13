@@ -10,7 +10,7 @@ import time
 # Automatically select GPU if available, otherwise fall back to CPU
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"[*] Using device: {DEVICE}")
-MODEL = whisper.load_model("large-v3", device=DEVICE)
+MODEL = whisper.load_model("medium.en", device=DEVICE)
 print("[+] Whisper model large-v3 loaded.")
 
 # --- Network Configuration ---
