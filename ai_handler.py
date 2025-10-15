@@ -4,10 +4,12 @@ import threading
 import requests
 import json
 import port_config as pc_
+
 HOST = "127.0.0.1"
 PORT = pc_.ai_handler
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
+
 def handle_client(conn, addr):
     print(f"[+] Connected by {addr}")
     try:
@@ -19,17 +21,15 @@ def handle_client(conn, addr):
 
         print(f"[User Prompt] {prompt}")
 
-        # Prepare Ollama payload
         payload = {
             "model": "llama3",
             "messages": [
-                {"role": "system", "content": "You are a assistant named BRIAN. answer in short sentences."},
+                {"role": "system", "content": "You are an assistant named BRIAN. Answer briefly and naturally."},
                 {"role": "user", "content": prompt}
             ],
             "stream": True
         }
 
-        # Stream response from Ollama
         with requests.post(OLLAMA_URL, json=payload, stream=True) as r:
             for line in r.iter_lines():
                 if line:
