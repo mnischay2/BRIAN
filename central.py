@@ -208,17 +208,18 @@ def handle_transcriber(conn, addr):
                 if not text: continue
 
                 print(f"🎤 Heard: {text}")
-                # Send user's message to UI immediately for responsiveness
-                send_to_all_ui({"type": "chat", "payload": {"role": "user", "content": text}})
 
                 lower_text = text.lower()
                 matched_wake = next((w for w in WAKE_WORDS if lower_text.startswith(w)), None)
                 if matched_wake:
+                    # Send user's message to UI only for valid wake word interactions
+                    send_to_all_ui({"type": "chat", "payload": {"role": "user", "content": text}})
+
                     trimmed = lower_text[len(matched_wake):].strip()
                     if not trimmed:
                         set_status("Idle", "grey")
                         continue
-                    
+
                     set_status("Awakened", "yellow")
                     # Get the AI's response
                     ai_response = send_to_ai(trimmed)
