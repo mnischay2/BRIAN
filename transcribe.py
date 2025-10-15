@@ -1,31 +1,22 @@
-#transcribe.py
-
 import socket
 import struct
 import numpy as np
 import torch
 import time
-import yaml
 import sys
+import json
 from whisper import load_model
 import port_config as pc_
 
-
 def main():
-    
     model_name = "large-v3"
     mic_host = "0.0.0.0"
     mic_port = pc_.transcriber
     central_host = "127.0.0.1"
     central_port = pc_.central
-    # stt device (cpu/gpu)
     stt_device_pref = "gpu"
 
-    # choose device based on config and availability
-    if stt_device_pref.lower() == 'gpu' and torch.cuda.is_available():
-        device = "cuda"
-    else:
-        device = "cpu"
+    device = "cuda" if stt_device_pref.lower() == 'gpu' and torch.cuda.is_available() else "cpu"
     print(f"[*] Using device for STT: {device}")
 
     model = load_model(model_name, device=device)
@@ -72,15 +63,21 @@ def handle_mic_client(conn, addr, model, central_sock, central_host, central_por
 
                 if not data: break
 
-                print(f"[*] Received {len(data)} bytes of audio data.")
+                # --- MODIFICATION START ---
+                # Inform central that we are processing audio
+                print("[*] Received audio, notifying central of 'Listening' state.")
+                central_sock = send_to_central(central_sock, {"type": "status", "payload": "Listening"}, central_host, central_port)
 
+                # Transcribe the audio
                 audio_np = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
                 result = model.transcribe(audio_np, language="en", fp16=(device=="cuda"))
                 text = result.get('text', '').strip()
 
                 if text:
                     print(f"📝 Transcription: {text}")
-                    central_sock = send_to_central(central_sock, text, central_host, central_port)
+                    # Send the final transcript
+                    central_sock = send_to_central(central_sock, {"type": "transcript", "payload": text}, central_host, central_port)
+                # --- MODIFICATION END ---
 
     except (ConnectionResetError, BrokenPipeError):
         print(f"[-] Mic client {addr} disconnected.")
@@ -88,12 +85,12 @@ def handle_mic_client(conn, addr, model, central_sock, central_host, central_por
         print(f"[-] Connection closed for mic client {addr}")
     return central_sock
 
-def send_to_central(sock, text, host, port):
+def send_to_central(sock, data, host, port):
+    """Sends a dictionary as a JSON payload to the central server."""
     try:
-        encoded_text = text.encode('utf-8')
-        length = struct.pack('>I', len(encoded_text))
-        sock.sendall(length)
-        sock.sendall(encoded_text)
+        payload = json.dumps(data).encode('utf-8')
+        length = struct.pack('>I', len(payload))
+        sock.sendall(length + payload)
         return sock
     except (socket.error, BrokenPipeError):
         print("[!] Central service disconnected. Reconnecting...")
