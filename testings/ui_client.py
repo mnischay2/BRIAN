@@ -9,7 +9,6 @@ import yaml
 import sys
 
 def load_config():
-    """Loads the main configuration file."""
     try:
         with open("config.yaml", "r") as f:
             return yaml.safe_load(f)
@@ -25,9 +24,11 @@ class AssistantUI:
         self.root.configure(bg="#1e1e1e")
         self.message_queue = queue.Queue()
 
+        self.partial_mode = False  # track streaming partial inserts
+
         self._setup_fonts()
         self._setup_ui()
-        
+
         self.root.after(100, self.process_queue)
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -65,10 +66,17 @@ class AssistantUI:
         self.text_area.config(state='disabled')
         self.text_area.yview(tk.END)
 
+    def append_to_last_assistant_line(self, text):
+        """Append incremental text to the last assistant entry (used for streaming)."""
+        self.text_area.config(state='normal')
+        # find last index to append to (end - 1 char)
+        self.text_area.insert(tk.END, text)
+        self.text_area.config(state='disabled')
+        self.text_area.yview(tk.END)
+
     def process_queue(self):
         try:
             message = self.message_queue.get_nowait()
-            print(f"[UI DEBUG] Processing message from queue: '{message}'") # Debug line added
             parts = message.split(':', 1)
             msg_type = parts[0]
             content = parts[1] if len(parts) > 1 else ""
@@ -77,37 +85,52 @@ class AssistantUI:
                 color = "#7be08a" if content == "LISTENING" else "#e07b7b"
                 self.update_status(self.wake_status, "WAKE", content, color)
             elif msg_type == "llm_status":
-                colors = {"IDLE": "#a0a0a0", "THINKING": "#e0d37b", "SPEAKING": "#7bcee0"}
+                colors = {"IDLE": "#a0a0a0", "THINKING": "#e0d37b", "READING": "#b58bff", "SPEAKING": "#7bcee0"}
                 self.update_status(self.llm_status, "LLM", content, colors.get(content, "#a0a0a0"))
             elif msg_type == "user_transcription":
+                self.partial_mode = False
                 self.update_text_area("You", content)
+            elif msg_type == "llm_partial":
+                # If first partial chunk for this answer, insert "Assistant: " header
+                if not self.partial_mode:
+                    self.text_area.config(state='normal')
+                    self.text_area.insert(tk.END, "Assistant: ")
+                    self.text_area.config(state='disabled')
+                    self.partial_mode = True
+                # Append the incoming partial content inline
+                self.append_to_last_assistant_line(content)
             elif msg_type == "llm_response":
-                self.update_text_area("Assistant", content)
+                # Final full response — add newline separation and reset partial mode
+                if self.partial_mode:
+                    # ensure a newline after streaming
+                    self.text_area.config(state='normal')
+                    self.text_area.insert(tk.END, "\n\n")
+                    self.text_area.config(state='disabled')
+                else:
+                    self.update_text_area("Assistant", content)
+                self.partial_mode = False
             elif msg_type == "system_message":
+                self.partial_mode = False
                 self.update_text_area("System", content)
 
         except queue.Empty:
             pass
         finally:
             self.root.after(100, self.process_queue)
-    
+
     def on_closing(self):
         self.root.destroy()
 
 def handle_central_client(conn, msg_queue):
-    """Handles the connection from the central service, receiving all UI updates."""
     print("[+] Central service connected to UI.")
     try:
         with conn:
             while True:
-                # 1. Read the 4-byte length prefix to determine message size
                 length_bytes = conn.recv(4)
                 if not length_bytes:
                     print("[-] Central service closed the connection (no length).")
                     break
                 length = struct.unpack('>I', length_bytes)[0]
-                
-                # 2. Loop to ensure the full message is received
                 data = b""
                 while len(data) < length:
                     packet = conn.recv(length - len(data))
@@ -115,12 +138,8 @@ def handle_central_client(conn, msg_queue):
                         print("[-] Central service closed the connection (incomplete data).")
                         break
                     data += packet
-                
-                # This outer break is necessary if the inner loop breaks
                 if len(data) < length:
                     break
-
-                # 3. Put the complete message into the queue for the GUI thread
                 msg_queue.put(data.decode('utf-8'))
 
     except (ConnectionResetError, BrokenPipeError):
@@ -129,19 +148,12 @@ def handle_central_client(conn, msg_queue):
         print("[*] UI client handler finished.")
 
 def run_server(host, port, msg_queue):
-    """
-    The main server loop for the UI. It listens for a single connection
-    from the central service and passes it to the handler.
-    """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((host, port))
         s.listen()
         print(f"[*] UI Server listening for Central on {host}:{port}")
         while True:
-            # This server is designed to only handle one client: the central service.
-            # If the client disconnects, the handler will finish, and this loop
-            # will wait to accept a new connection.
             conn, addr = s.accept()
             handle_central_client(conn, msg_queue)
 
@@ -156,13 +168,11 @@ def main():
 
     root = tk.Tk()
     app = AssistantUI(root)
-    
-    # Start the network listener in a separate thread so it doesn't block the GUI
+
     server_thread = threading.Thread(target=run_server, args=(host, port, app.message_queue), daemon=True)
     server_thread.start()
-    
+
     root.mainloop()
 
 if __name__ == "__main__":
     main()
-

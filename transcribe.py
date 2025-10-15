@@ -7,54 +7,42 @@ import time
 import yaml
 import sys
 from whisper import load_model
+import port_config as pc_
 
-def load_config():
-    """Loads the main configuration file."""
-    try:
-        with open("config.yaml", "r") as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        print("[!!!] CRITICAL: config.yaml not found.")
-        sys.exit(1)
 
 def main():
-    config = load_config()
-
-    # --- Load Configuration ---
-    try:
-        model_name = config['models']['whisper']
-        transcriber_config = config['ports']['transcriber']
-        mic_host = transcriber_config['mic_host']
-        mic_port = transcriber_config['mic_port']
-        central_host = transcriber_config['central_host']
-        central_port = transcriber_config['central_port']
-    except KeyError as e:
-        print(f"[!!!] CRITICAL: Missing configuration in config.yaml. Key not found: {e}")
-        sys.exit(1)
-
-    # --- Whisper Model Initialization ---
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"[*] Using device: {device}")
-    model = load_model(model_name, device=device)
-    print(f"[+] Whisper model '{model_name}' loaded.")
-
-    # --- Main Server Loop ---
-    central_sock = connect_to_central(central_host, central_port)
     
+    model_name = "large-v3"
+    mic_host = "0.0.0.0"
+    mic_port = pc_.transcriber
+    central_host = "127.0.0.1"
+    central_port = pc_.central
+    # stt device (cpu/gpu)
+    stt_device_pref = "gpu"
+
+    # choose device based on config and availability
+    if stt_device_pref.lower() == 'gpu' and torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
+    print(f"[*] Using device for STT: {device}")
+
+    model = load_model(model_name, device=device)
+    print(f"[+] Whisper model '{model_name}' loaded on {device}.")
+
+    central_sock = connect_to_central(central_host, central_port)
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((mic_host, mic_port))
         s.listen()
         print(f"[*] Transcriber listening for mic on {mic_host}:{mic_port}")
-        
+
         while True:
             conn, addr = s.accept()
-            # Since we only expect one mic, we handle it in the main thread.
-            # For multiple mics, a new thread would be needed here.
             central_sock = handle_mic_client(conn, addr, model, central_sock, central_host, central_port, device)
 
 def connect_to_central(host, port):
-    """Connects to the central service with retries."""
     while True:
         try:
             print(f"[*] Transcriber connecting to central service at {host}:{port}...")
@@ -67,28 +55,27 @@ def connect_to_central(host, port):
             time.sleep(5)
 
 def handle_mic_client(conn, addr, model, central_sock, central_host, central_port, device):
-    """Handles a connection from the mic, transcribes, and forwards."""
     print(f"[+] Mic client connected from {addr}")
     try:
         with conn:
             while True:
                 length_bytes = conn.recv(4)
                 if not length_bytes: break
-                
+
                 length = struct.unpack('>I', length_bytes)[0]
                 data = b""
                 while len(data) < length:
                     packet = conn.recv(length - len(data))
                     if not packet: break
                     data += packet
-                
+
                 if not data: break
-                
+
                 print(f"[*] Received {len(data)} bytes of audio data.")
-                
+
                 audio_np = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
                 result = model.transcribe(audio_np, language="en", fp16=(device=="cuda"))
-                text = result['text'].strip()
+                text = result.get('text', '').strip()
 
                 if text:
                     print(f"📝 Transcription: {text}")
@@ -101,7 +88,6 @@ def handle_mic_client(conn, addr, model, central_sock, central_host, central_por
     return central_sock
 
 def send_to_central(sock, text, host, port):
-    """Sends the transcribed text to the central service."""
     try:
         encoded_text = text.encode('utf-8')
         length = struct.pack('>I', len(encoded_text))
@@ -115,4 +101,3 @@ def send_to_central(sock, text, host, port):
 
 if __name__ == "__main__":
     main()
-
