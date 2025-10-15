@@ -1,7 +1,7 @@
-# central.py
 import socket
 import time
 import struct
+import json
 import port_config as pc_
 
 AI_HOST = "127.0.0.1"
@@ -10,12 +10,35 @@ AI_PORT = pc_.ai_handler
 TTS_HOST = "127.0.0.1"
 TTS_PORT = pc_.speaker
 
+SESSION_HOST = "127.0.0.1"
+SESSION_PORT = pc_.session_mgr
+
 HOST = "0.0.0.0"
 PORT = pc_.central
 
 WAKE_WORDS = ["hi brian", "hey brian", "ok brian"]
 
 
+# -------------------------------
+# Session Manager Integration
+# -------------------------------
+def send_to_session_mgr(entry):
+    """Send an interaction entry to session manager via socket."""
+    try:
+        payload = json.dumps(entry).encode("utf-8")
+        length = struct.pack(">I", len(payload))
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect((SESSION_HOST, SESSION_PORT))
+            s.sendall(length + payload)
+    except ConnectionRefusedError:
+        print("[⚠️] Session manager not running or unreachable.")
+    except Exception as e:
+        print(f"[SessionMgr Error] {e}")
+
+
+# -------------------------------
+# Core Communication Functions
+# -------------------------------
 def send_to_tts(text):
     """Send text to the TTS server."""
     try:
@@ -27,7 +50,7 @@ def send_to_tts(text):
 
 
 def send_to_ai(prompt):
-    """Send prompt to AI handler and stream response."""
+    """Send prompt to AI handler and stream response to TTS and SessionMgr."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as ai_sock:
             ai_sock.connect((AI_HOST, AI_PORT))
@@ -35,6 +58,8 @@ def send_to_ai(prompt):
 
             print(f"🧠 AI ({prompt[:50]}...): ", end="", flush=True)
             buffer = ""
+            full_response = ""
+
             while True:
                 data = ai_sock.recv(1024)
                 if not data:
@@ -44,8 +69,12 @@ def send_to_ai(prompt):
 
                 # Stop at the termination marker
                 if "\n--- done ---\n" in chunk:
+                    chunk = chunk.replace("\n--- done ---\n", "")
+                    if chunk.strip():
+                        buffer += chunk
                     if buffer.strip():
                         send_to_tts(buffer.strip())
+                        full_response += buffer.strip() + " "
                     buffer = ""
                     break
 
@@ -57,11 +86,19 @@ def send_to_ai(prompt):
                     text_to_send = buffer.strip()
                     if text_to_send:
                         send_to_tts(text_to_send)
+                        full_response += text_to_send + " "
                     buffer = ""
                     time.sleep(0.1)
 
             if buffer.strip():
                 send_to_tts(buffer.strip())
+                full_response += buffer.strip()
+
+            # Log assistant response to session manager
+            send_to_session_mgr({
+                "role": "assistant",
+                "content": full_response.strip()
+            })
 
             print("\n--- end of AI response ---")
 
@@ -69,6 +106,9 @@ def send_to_ai(prompt):
         print(f"[AI Handler Error] {e}")
 
 
+# -------------------------------
+# Transcriber Handler
+# -------------------------------
 def handle_transcriber(conn, addr):
     """Receive transcribed text and process wake word."""
     print(f"[+] Transcriber connected from {addr}")
@@ -88,6 +128,12 @@ def handle_transcriber(conn, addr):
             text = data.decode('utf-8').strip()
             print(f"🎤 Heard: {text}")
 
+            # Log user input to session manager
+            send_to_session_mgr({
+                "role": "user",
+                "content": text
+            })
+
             # Check for wake word
             lower_text = text.lower()
             matched_wake = next((w for w in WAKE_WORDS if lower_text.startswith(w)), None)
@@ -102,6 +148,9 @@ def handle_transcriber(conn, addr):
                 print("[~] No wake word detected. Ignoring input.")
 
 
+# -------------------------------
+# Main Server
+# -------------------------------
 def main():
     print(f"[*] Central server listening on {HOST}:{PORT}")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_sock:
