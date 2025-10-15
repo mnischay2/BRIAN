@@ -24,7 +24,7 @@ def handle_client(conn, addr):
         payload = {
             "model": "llama3",
             "messages": [
-                {"role": "system", "content": "You are an assistant named BRIAN. Answer briefly and naturally."},
+                {"role": "system", "content": "You are an assistant named BRIAN. Answer briefly and naturally no markup or aserisks."},
                 {"role": "user", "content": prompt}
             ],
             "stream": True
