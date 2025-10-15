@@ -1,3 +1,4 @@
+# session_mgr.py
 import socket
 import struct
 import json

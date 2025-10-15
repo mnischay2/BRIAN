@@ -1,4 +1,5 @@
-#!/home/nischay/linenv311/bin/python
+#transcribe.py
+
 import socket
 import struct
 import numpy as np
