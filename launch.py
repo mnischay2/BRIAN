@@ -4,8 +4,9 @@ python_path = "/home/nischay/linenv311/bin/python"
 files_list = [
     "central.py", "speaker.py", "ai_handler.py","transcribe.py", "mic.py","ui_client.py","session_mgr.py"
 ]
+script_dir = "scripts/"
 
 for script in files_list:
     subprocess.Popen([
-        "xterm", "-hold", "-e", f"{python_path} {script}"
+        "xterm", "-hold", "-e", f"{python_path} {script_dir}{script}"
     ])
