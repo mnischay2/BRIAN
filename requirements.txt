@@ -13,10 +13,3 @@ openai-whisper
 requests
 gtts
 TTS
-psycopg[binary]
-pgvector
-sentence-transformers
-docling
-langextract
-ollama
-python-dotenv

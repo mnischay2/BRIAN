@@ -1,0 +1,9 @@
+[
+    {
+        "timestamp": "2025-10-15T10:29:48.400539",
+        "interaction": {
+            "question": "Hi Brian, tell me how to optimize my code if I am using recursion?",
+            "answer": "When optimizing recursive code, consider the following:\n\n1. Memoization: Store previously computed results in a cache to avoid redundant calculations.\n2. Iterative approach: Convert recursive functions to iterative ones by using loops and avoiding function calls.\n3. Depth limit: Implement a maximum depth or stack size to prevent excessive recursion and potential stack overflows.\n4. Early returns: Optimize exit conditions to reduce the number of recursive calls.\n5. Function inlining: Inline small recursive functions to reduce overhead.\n\nRemember, premature optimization is a bad idea! Focus on writing clean, readable code first, then profile and optimize as needed."
+        }
+    }
+]

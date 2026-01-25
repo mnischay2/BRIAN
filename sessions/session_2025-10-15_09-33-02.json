@@ -1,0 +1,30 @@
+[
+    {
+        "timestamp": "2025-10-15T09:33:22.348554",
+        "interaction": {
+            "role": "user",
+            "content": "Hi Brain!"
+        }
+    },
+    {
+        "timestamp": "2025-10-15T09:33:52.574107",
+        "interaction": {
+            "role": "user",
+            "content": "Hi Brian!"
+        }
+    },
+    {
+        "timestamp": "2025-10-15T09:33:53.212215",
+        "interaction": {
+            "role": "assistant",
+            "content": "Hi! How can I help you today?"
+        }
+    },
+    {
+        "timestamp": "2025-10-15T09:33:59.022117",
+        "interaction": {
+            "role": "user",
+            "content": "Hi, how can I help you today?"
+        }
+    }
+]
