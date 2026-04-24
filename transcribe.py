@@ -6,7 +6,7 @@ import time
 import sys
 import json
 from whisper import load_model
-import port_config as pc_
+import scripts.configs.port_config as pc_
 
 def main():
     model_name = "large-v3"

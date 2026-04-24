@@ -8,7 +8,7 @@ from datetime import datetime
 import threading
 import yaml
 import sys
-import port_config as pc_
+import scripts.configs.port_config as pc_
 
 class SessionManager:
     def __init__(self):

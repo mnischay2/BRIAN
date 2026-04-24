@@ -5,7 +5,7 @@ import struct
 import tkinter as tk
 from tkinter import scrolledtext, PhotoImage
 from queue import Queue, Empty
-import port_config as pc_
+import scripts.configs.port_config as pc_
 
 # --- Configuration ---
 CENTRAL_HOST = "127.0.0.1"

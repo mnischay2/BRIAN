@@ -3,7 +3,7 @@ import time
 import struct
 import json
 import threading
-import port_config as pc_
+import scripts.configs.port_config as pc_
 
 # --- Service Hosts ---
 AI_HOST = "127.0.0.1"

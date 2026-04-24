@@ -5,7 +5,7 @@ import numpy as np
 import struct
 import collections
 import sys
-import port_config as pc_
+import scripts.configs.port_config as pc_
 
 def main():
     transcriber_host = "127.0.0.1"

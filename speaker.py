@@ -6,7 +6,7 @@ import torch
 import threading
 from TTS.api import TTS
 import collections
-import port_config as pc_
+import scripts.configs.port_config as pc_
 
 torch.serialization.add_safe_globals([dict, collections.defaultdict])
 from TTS.utils import radam

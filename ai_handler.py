@@ -3,8 +3,8 @@ import socket
 import threading
 import requests
 import json
-import port_config as pc_
-
+import scripts.configs.port_config as pc_
+from scripts.configs.config import CONF
 HOST = "127.0.0.1"
 PORT = pc_.ai_handler
 
@@ -22,7 +22,7 @@ def handle_client(conn, addr):
         print(f"[User Prompt] {prompt}")
 
         payload = {
-            "model": "llama3",
+            "model": CONF.get("LLM_MODEL", "llama3:latest"),
             "messages": [
                 {"role": "system", "content": "You are an assistant named BRIAN. Answer briefly and naturally no markup or aserisks."},
                 {"role": "user", "content": prompt}
